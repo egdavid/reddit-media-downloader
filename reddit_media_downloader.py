@@ -3,6 +3,7 @@ import aiohttp
 import aiofiles
 import os
 import urllib.parse
+import json
 from typing import List, Dict, Optional
 from dataclasses import dataclass
 import logging
@@ -21,6 +22,8 @@ class RedditMediaDownloader:
         self.headers = {'User-agent': 'RedditMediaDownloader 1.0'}
         self.session: Optional[aiohttp.ClientSession] = None
         self.logger = self._setup_logger()
+        self.downloaded_files = set(self.load_downloaded_files())
+        self.state_file = os.path.join(self.output_dir, f"{username}_state.json")
 
     def _setup_logger(self) -> logging.Logger:
         logger = logging.getLogger(__name__)
@@ -30,6 +33,21 @@ class RedditMediaDownloader:
         handler.setFormatter(formatter)
         logger.addHandler(handler)
         return logger
+
+    def load_downloaded_files(self):
+        if not os.path.exists(self.output_dir):
+            os.makedirs(self.output_dir)
+        return [f for f in os.listdir(self.output_dir) if os.path.isfile(os.path.join(self.output_dir, f))]
+
+    def save_state(self, after):
+        with open(self.state_file, 'w') as f:
+            json.dump({"after": after}, f)
+
+    def load_state(self):
+        if os.path.exists(self.state_file):
+            with open(self.state_file, 'r') as f:
+                return json.load(f)
+        return {"after": None}
 
     async def _create_session(self):
         self.session = aiohttp.ClientSession(headers=self.headers)
@@ -73,6 +91,7 @@ class RedditMediaDownloader:
                     async with aiofiles.open(file_path, mode='wb') as f:
                         await f.write(await response.read())
                     self.logger.info(f"Downloaded: {media.filename}")
+                    self.downloaded_files.add(media.filename)
                 else:
                     self.logger.error(f"Error downloading {media.filename}: {response.status}")
         except aiohttp.ClientError as e:
@@ -81,7 +100,8 @@ class RedditMediaDownloader:
     async def download_all_media(self):
         await self._create_session()
         try:
-            after = None
+            state = self.load_state()
+            after = state["after"]
             total_media = 0
             
             with tqdm(desc="Downloading media", unit="file") as pbar:
@@ -92,12 +112,15 @@ class RedditMediaDownloader:
                     if not media_list:
                         break
                     
-                    total_media += len(media_list)
-                    tasks = [self.download_media(media) for media in media_list]
+                    media_to_download = [media for media in media_list if media.filename not in self.downloaded_files]
+                    
+                    total_media += len(media_to_download)
+                    tasks = [self.download_media(media) for media in media_to_download]
                     await asyncio.gather(*tasks)
-                    pbar.update(len(media_list))
+                    pbar.update(len(media_to_download))
                     
                     after = data.get('data', {}).get('after')
+                    self.save_state(after)
                     if not after:
                         break
             
