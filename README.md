@@ -18,7 +18,7 @@ I originally created this tool to simplify the process of finding and saving con
 
 1. Clone this repository:
 
-   `git clone https://github.com/yourusername/reddit-media-downloader.git`
+   `git clone https://github.com/egdavid/reddit-media-downloader.git`
 
 2. Navigate to the project directory:
 
